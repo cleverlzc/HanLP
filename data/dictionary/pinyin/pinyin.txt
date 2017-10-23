@@ -1859,7 +1859,7 @@
 假=jia3,jia4
 假分数=jia3,fen1,shu4
 假日=jia4,ri4
-假期=ja4,qi1
+假期=jia4,qi1
 假条=jia4,tiao2
 假洋鬼子=jia3,yang2,gui3,zi5
 偈=ji4,jie2
@@ -6607,7 +6607,7 @@
 孤身只影=gu1,shen1,zhi1,ying3
 孥=nu2
 学=xue2
-学子=xue2,sheng1
+学子=xue2,zi3
 学长=xue2,zhang3
 孧=you4,niu1
 孨=zhuan3
@@ -30723,3 +30723,6 @@
 龣=jiao3
 龤=xie2
 龥=yue4
+重启=chong2,qi3
+还款=huan2,kuan3
+侠传=xia2,zhuan4

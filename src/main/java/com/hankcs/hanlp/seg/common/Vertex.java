@@ -88,7 +88,7 @@ public class Vertex
      */
     public Vertex(String word, String realWord, CoreDictionary.Attribute attribute)
     {
-        this(word, realWord, attribute, -1);
+        this(word, realWord, attribute, attribute == null ? -1 : -attribute.totalFrequency);
     }
 
     public Vertex(String word, String realWord, CoreDictionary.Attribute attribute, int wordID)
@@ -136,7 +136,9 @@ public class Vertex
                 case nx:
                 {
                     wordID = CoreDictionary.NX_WORD_ID;
-                    this.attribute = CoreDictionary.get(CoreDictionary.NX_WORD_ID);
+                    if (wordID == -1)
+                        wordID = CoreDictionary.X_WORD_ID;
+//                    this.attribute = CoreDictionary.get(wordID);
                     return Predefine.TAG_PROPER;
                 }
                 case nt:
@@ -151,7 +153,7 @@ public class Vertex
                 case nit:
                 {
                     wordID = CoreDictionary.NT_WORD_ID;
-                    this.attribute = CoreDictionary.get(CoreDictionary.NT_WORD_ID);
+//                    this.attribute = CoreDictionary.get(CoreDictionary.NT_WORD_ID);
                     return Predefine.TAG_GROUP;
                 }
                 case m:

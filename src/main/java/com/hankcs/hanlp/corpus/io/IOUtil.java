@@ -14,6 +14,7 @@ package com.hankcs.hanlp.corpus.io;
 
 import com.hankcs.hanlp.corpus.tag.Nature;
 import com.hankcs.hanlp.dictionary.CoreDictionary;
+import com.hankcs.hanlp.utility.LexiconUtility;
 import com.hankcs.hanlp.utility.TextUtility;
 
 import java.io.*;
@@ -23,6 +24,7 @@ import java.nio.charset.Charset;
 import java.util.*;
 
 import static com.hankcs.hanlp.utility.Predefine.logger;
+import static com.hankcs.hanlp.HanLP.Config.IOAdapter;
 
 /**
  * 一些常用的IO操作
@@ -42,7 +44,7 @@ public class IOUtil
     {
         try
         {
-            ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(path));
+            ObjectOutputStream oos = new ObjectOutputStream(IOUtil.newOutputStream(path));
             oos.writeObject(o);
             oos.close();
         }
@@ -66,7 +68,7 @@ public class IOUtil
         ObjectInputStream ois = null;
         try
         {
-            ois = new ObjectInputStream(new FileInputStream(path));
+            ois = new ObjectInputStream(IOUtil.newInputStream(path));
             Object o = ois.readObject();
             ois.close();
             return o;
@@ -88,14 +90,17 @@ public class IOUtil
     public static String readTxt(String path)
     {
         if (path == null) return null;
-        File file = new File(path);
-        Long fileLength = file.length();
-        byte[] fileContent = new byte[fileLength.intValue()];
         try
         {
-            FileInputStream in = new FileInputStream(file);
-            in.read(fileContent);
+            InputStream in = IOAdapter == null ? new FileInputStream(path) :
+                    IOAdapter.open(path);
+            byte[] fileContent = new byte[in.available()];
+            readBytesFromOtherInputStream(in, fileContent);
             in.close();
+            // 处理 UTF-8 BOM
+            if (fileContent[0] == -17 && fileContent[1] == -69 && fileContent[2] == -65)
+                return new String(fileContent, 3, fileContent.length - 3, Charset.forName("UTF-8"));
+            return new String(fileContent, Charset.forName("UTF-8"));
         }
         catch (FileNotFoundException e)
         {
@@ -107,8 +112,6 @@ public class IOUtil
             logger.warning("读取" + path + "发生IO异常" + e);
             return null;
         }
-
-        return new String(fileContent, Charset.forName("UTF-8"));
     }
 
     public static LinkedList<String[]> readCsv(String path)
@@ -172,17 +175,13 @@ public class IOUtil
     {
         try
         {
-            FileInputStream fis = new FileInputStream(path);
-            FileChannel channel = fis.getChannel();
-            int fileSize = (int) channel.size();
-            ByteBuffer byteBuffer = ByteBuffer.allocate(fileSize);
-            channel.read(byteBuffer);
-            byteBuffer.flip();
-            byte[] bytes = byteBuffer.array();
-            byteBuffer.clear();
-            channel.close();
-            fis.close();
-            return bytes;
+            if (IOAdapter == null) return readBytesFromFileInputStream(new FileInputStream(path));
+
+            InputStream is = IOAdapter.open(path);
+            if (is instanceof FileInputStream)
+                return readBytesFromFileInputStream((FileInputStream) is);
+            else
+                return readBytesFromOtherInputStream(is);
         }
         catch (Exception e)
         {
@@ -190,6 +189,117 @@ public class IOUtil
         }
 
         return null;
+    }
+
+    public static String readTxt(String file, String charsetName) throws IOException
+    {
+        InputStream is = IOAdapter.open(file);
+        byte[] targetArray = new byte[is.available()];
+        int len;
+        int off = 0;
+        while ((len = is.read(targetArray, off, targetArray.length - off)) != -1 && off < targetArray.length)
+        {
+            off += len;
+        }
+        is.close();
+
+        return new String(targetArray, charsetName);
+    }
+
+    public static String baseName(String path)
+    {
+        if (path == null || path.length() == 0)
+            return "";
+        path = path.replaceAll("[/\\\\]+", "/");
+        int len = path.length(),
+                upCount = 0;
+        while (len > 0)
+        {
+            //remove trailing separator
+            if (path.charAt(len - 1) == '/')
+            {
+                len--;
+                if (len == 0)
+                    return "";
+            }
+            int lastInd = path.lastIndexOf('/', len - 1);
+            String fileName = path.substring(lastInd + 1, len);
+            if (fileName.equals("."))
+            {
+                len--;
+            }
+            else if (fileName.equals(".."))
+            {
+                len -= 2;
+                upCount++;
+            }
+            else
+            {
+                if (upCount == 0)
+                    return fileName;
+                upCount--;
+                len -= fileName.length();
+            }
+        }
+        return "";
+    }
+
+    private static byte[] readBytesFromFileInputStream(FileInputStream fis) throws IOException
+    {
+        FileChannel channel = fis.getChannel();
+        int fileSize = (int) channel.size();
+        ByteBuffer byteBuffer = ByteBuffer.allocate(fileSize);
+        channel.read(byteBuffer);
+        byteBuffer.flip();
+        byte[] bytes = byteBuffer.array();
+        byteBuffer.clear();
+        channel.close();
+        fis.close();
+        return bytes;
+    }
+
+    /**
+     * 将非FileInputStream的某InputStream中的全部数据读入到字节数组中
+     *
+     * @param is
+     * @return
+     * @throws IOException
+     */
+    public static byte[] readBytesFromOtherInputStream(InputStream is) throws IOException
+    {
+        ByteArrayOutputStream data = new ByteArrayOutputStream();
+
+        int readBytes;
+        byte[] buffer = new byte[Math.max(is.available(), 4096)]; // 最低4KB的缓冲区
+
+        while ((readBytes = is.read(buffer, 0, buffer.length)) != -1)
+        {
+            data.write(buffer, 0, readBytes);
+        }
+
+        data.flush();
+
+        return data.toByteArray();
+    }
+
+    /**
+     * 从InputStream读取指定长度的字节出来
+     * @param is 流
+     * @param targetArray output
+     * @return 实际读取了多少字节，返回0表示遇到了文件尾部
+     * @throws IOException
+     */
+    public static int readBytesFromOtherInputStream(InputStream is, byte[] targetArray) throws IOException
+    {
+        assert targetArray != null;
+        assert targetArray.length > 0;
+        int len;
+        int off = 0;
+        while (off < targetArray.length && (len = is.read(targetArray, off, targetArray.length - off)) != -1)
+        {
+            off += len;
+        }
+        return off;
     }
 
     public static LinkedList<String> readLineList(String path)
@@ -216,11 +326,18 @@ public class IOUtil
     {
         LinkedList<String> result = new LinkedList<String>();
         String line = null;
+        boolean first = true;
         try
         {
-            BufferedReader bw = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+            BufferedReader bw = new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
             while ((line = bw.readLine()) != null)
             {
+                if (first)
+                {
+                    first = false;
+                    if (!line.isEmpty() && line.charAt(0) == '\uFEFF')
+                        line = line.substring(1);
+                }
                 result.add(line);
             }
             bw.close();
@@ -275,6 +392,16 @@ public class IOUtil
     }
 
     /**
+     * 删除本地文件
+     * @param path
+     * @return
+     */
+    public static boolean deleteFile(String path)
+    {
+        return new File(path).delete();
+    }
+
+    /**
      * 方便读取按行读取大文件
      */
     public static class LineIterator implements Iterator<String>
@@ -286,12 +413,12 @@ public class IOUtil
         {
             try
             {
-                bw = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+                bw = new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
                 line = bw.readLine();
             }
             catch (FileNotFoundException e)
             {
-                logger.warning("文件" + path + "不存在，接下来的调用会返回null" + TextUtility.exceptionToString(e));
+                logger.warning("文件" + path + "不存在，接下来的调用会返回null\n" + TextUtility.exceptionToString(e));
                 bw = null;
             }
             catch (IOException e)
@@ -386,9 +513,9 @@ public class IOUtil
      * @throws FileNotFoundException
      * @throws UnsupportedEncodingException
      */
-    public static BufferedWriter newBufferedWriter(String path) throws FileNotFoundException, UnsupportedEncodingException
+    public static BufferedWriter newBufferedWriter(String path) throws IOException
     {
-        return new BufferedWriter(new OutputStreamWriter(new FileOutputStream(path), "UTF-8"));
+        return new BufferedWriter(new OutputStreamWriter(IOUtil.newOutputStream(path), "UTF-8"));
     }
 
     /**
@@ -398,14 +525,38 @@ public class IOUtil
      * @throws FileNotFoundException
      * @throws UnsupportedEncodingException
      */
-    public static BufferedReader newBufferedReader(String path) throws FileNotFoundException, UnsupportedEncodingException
+    public static BufferedReader newBufferedReader(String path) throws IOException
     {
-        return new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+        return new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
     }
 
     public static BufferedWriter newBufferedWriter(String path, boolean append) throws FileNotFoundException, UnsupportedEncodingException
     {
         return new BufferedWriter(new OutputStreamWriter(new FileOutputStream(path, append), "UTF-8"));
+    }
+
+    /**
+     * 创建输入流（经过IO适配器创建）
+     * @param path
+     * @return
+     * @throws IOException
+     */
+    public static InputStream newInputStream(String path) throws IOException
+    {
+        if (IOAdapter == null) return new FileInputStream(path);
+        return IOAdapter.open(path);
+    }
+
+    /**
+     * 创建输出流（经过IO适配器创建）
+     * @param path
+     * @return
+     * @throws IOException
+     */
+    public static OutputStream newOutputStream(String path) throws IOException
+    {
+        if (IOAdapter == null) return new FileOutputStream(path);
+        return IOAdapter.create(path);
     }
 
     /**
@@ -446,7 +597,7 @@ public class IOUtil
         TreeMap<String, CoreDictionary.Attribute> map = new TreeMap<String, CoreDictionary.Attribute>();
         for (String path : pathArray)
         {
-            BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+            BufferedReader br = new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
             loadDictionary(br, map);
         }
 
@@ -469,12 +620,22 @@ public class IOUtil
             CoreDictionary.Attribute attribute = new CoreDictionary.Attribute(natureCount);
             for (int i = 0; i < natureCount; ++i)
             {
-                attribute.nature[i] = Enum.valueOf(Nature.class, param[1 + 2 * i]);
+                attribute.nature[i] = LexiconUtility.convertStringToNature(param[1 + 2 * i]);
                 attribute.frequency[i] = Integer.parseInt(param[2 + 2 * i]);
                 attribute.totalFrequency += attribute.frequency[i];
             }
             storage.put(param[0], attribute);
         }
         br.close();
+    }
+
+    public static void writeCustomNature(DataOutputStream out, LinkedHashSet<Nature> customNatureCollector) throws IOException
+    {
+        if (customNatureCollector.size() == 0) return;
+        out.writeInt(-customNatureCollector.size());
+        for (Nature nature : customNatureCollector)
+        {
+            TextUtility.writeString(nature.toString(), out);
+        }
     }
 }

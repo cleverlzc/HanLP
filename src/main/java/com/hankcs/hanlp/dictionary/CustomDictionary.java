@@ -17,9 +17,12 @@ import com.hankcs.hanlp.collection.AhoCorasick.AhoCorasickDoubleArrayTrie;
 import com.hankcs.hanlp.collection.trie.DoubleArrayTrie;
 import com.hankcs.hanlp.collection.trie.bintrie.BinTrie;
 import com.hankcs.hanlp.corpus.io.ByteArray;
+import com.hankcs.hanlp.corpus.io.IOUtil;
 import com.hankcs.hanlp.corpus.tag.Nature;
 import com.hankcs.hanlp.dictionary.other.CharTable;
+import com.hankcs.hanlp.utility.LexiconUtility;
 import com.hankcs.hanlp.utility.Predefine;
+import com.hankcs.hanlp.utility.TextUtility;
 
 import java.io.*;
 import java.util.*;
@@ -38,14 +41,11 @@ public class CustomDictionary
      */
     public static BinTrie<CoreDictionary.Attribute> trie;
     public static DoubleArrayTrie<CoreDictionary.Attribute> dat = new DoubleArrayTrie<CoreDictionary.Attribute>();
-    /**
-     * 第一个是主词典，其他是副词典
-     */
-    public final static String path[] = HanLP.Config.CustomDictionaryPath;
 
     // 自动加载词典
     static
     {
+        String path[] = HanLP.Config.CustomDictionaryPath;
         long start = System.currentTimeMillis();
         if (!loadMainDictionary(path[0]))
         {
@@ -61,9 +61,12 @@ public class CustomDictionary
     {
         logger.info("自定义词典开始加载:" + mainPath);
         if (loadDat(mainPath)) return true;
+        dat = new DoubleArrayTrie<CoreDictionary.Attribute>();
         TreeMap<String, CoreDictionary.Attribute> map = new TreeMap<String, CoreDictionary.Attribute>();
+        LinkedHashSet<Nature> customNatureCollector = new LinkedHashSet<Nature>();
         try
         {
+            String path[] = HanLP.Config.CustomDictionaryPath;
             for (String p : path)
             {
                 Nature defaultNature = Nature.n;
@@ -75,7 +78,7 @@ public class CustomDictionary
                     p = p.substring(0, cut);
                     try
                     {
-                        defaultNature = Nature.valueOf(nature);
+                        defaultNature = LexiconUtility.convertStringToNature(nature, customNatureCollector);
                     }
                     catch (Exception e)
                     {
@@ -84,7 +87,7 @@ public class CustomDictionary
                     }
                 }
                 logger.info("以默认词性[" + defaultNature + "]加载自定义词典" + p + "中……");
-                boolean success = load(p, defaultNature, map);
+                boolean success = load(p, defaultNature, map, customNatureCollector);
                 if (!success) logger.warning("失败：" + p);
             }
             if (map.size() == 0)
@@ -102,17 +105,14 @@ public class CustomDictionary
             {
                 attributeList.add(entry.getValue());
             }
-            DataOutputStream out = new DataOutputStream(new FileOutputStream(mainPath + Predefine.BIN_EXT));
+            DataOutputStream out = new DataOutputStream(IOUtil.newOutputStream(mainPath + Predefine.BIN_EXT));
+            // 缓存用户词性
+            IOUtil.writeCustomNature(out, customNatureCollector);
+            // 缓存正文
             out.writeInt(attributeList.size());
             for (CoreDictionary.Attribute attribute : attributeList)
             {
-                out.writeInt(attribute.totalFrequency);
-                out.writeInt(attribute.nature.length);
-                for (int i = 0; i < attribute.nature.length; ++i)
-                {
-                    out.writeInt(attribute.nature[i].ordinal());
-                    out.writeInt(attribute.frequency[i]);
-                }
+                attribute.save(out);
             }
             dat.save(out);
             out.close();
@@ -129,7 +129,7 @@ public class CustomDictionary
         }
         catch (Exception e)
         {
-            logger.warning("自定义词典" + mainPath + "缓存失败！" + e);
+            logger.warning("自定义词典" + mainPath + "缓存失败！\n" + TextUtility.exceptionToString(e));
         }
         return true;
     }
@@ -140,23 +140,26 @@ public class CustomDictionary
      *
      * @param path          词典路径
      * @param defaultNature 默认词性
+     * @param customNatureCollector 收集用户词性
      * @return
      */
-    public static boolean load(String path, Nature defaultNature, TreeMap<String, CoreDictionary.Attribute> map)
+    public static boolean load(String path, Nature defaultNature, TreeMap<String, CoreDictionary.Attribute> map, LinkedHashSet<Nature> customNatureCollector)
     {
         try
         {
-            BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+            String splitter = "\\s";
+            if (path.endsWith(".csv"))
+            {
+                splitter = ",";
+            }
+            BufferedReader br = new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
             String line;
             while ((line = br.readLine()) != null)
             {
-                String[] param = line.split("\\s");
+                String[] param = line.split(splitter);
                 if (param[0].length() == 0) continue;   // 排除空行
                 if (HanLP.Config.Normalization) param[0] = CharTable.convert(param[0]); // 正规化
-//                if (CoreDictionary.contains(param[0]) || map.containsKey(param[0]))
-//                {
-//                    continue;
-//                }
+
                 int natureCount = (param.length - 1) / 2;
                 CoreDictionary.Attribute attribute;
                 if (natureCount == 0)
@@ -168,11 +171,12 @@ public class CustomDictionary
                     attribute = new CoreDictionary.Attribute(natureCount);
                     for (int i = 0; i < natureCount; ++i)
                     {
-                        attribute.nature[i] = Enum.valueOf(Nature.class, param[1 + 2 * i]);
+                        attribute.nature[i] = LexiconUtility.convertStringToNature(param[1 + 2 * i], customNatureCollector);
                         attribute.frequency[i] = Integer.parseInt(param[2 + 2 * i]);
                         attribute.totalFrequency += attribute.frequency[i];
                     }
                 }
+//                if (updateAttributeIfExist(param[0], attribute, map, rewriteTable)) continue;
                 map.put(param[0], attribute);
             }
             br.close();
@@ -187,7 +191,43 @@ public class CustomDictionary
     }
 
     /**
-     * 往自定义词典中插入一个新词（非覆盖模式）
+     * 如果已经存在该词条,直接更新该词条的属性
+     * @param key 词语
+     * @param attribute 词语的属性
+     * @param map 加载期间的map
+     * @param rewriteTable
+     * @return 是否更新了
+     */
+    private static boolean updateAttributeIfExist(String key, CoreDictionary.Attribute attribute, TreeMap<String, CoreDictionary.Attribute> map, TreeMap<Integer, CoreDictionary.Attribute> rewriteTable)
+    {
+        int wordID = CoreDictionary.getWordID(key);
+        CoreDictionary.Attribute attributeExisted;
+        if (wordID != -1)
+        {
+            attributeExisted = CoreDictionary.get(wordID);
+            attributeExisted.nature = attribute.nature;
+            attributeExisted.frequency = attribute.frequency;
+            attributeExisted.totalFrequency = attribute.totalFrequency;
+            // 收集该覆写
+            rewriteTable.put(wordID, attribute);
+            return true;
+        }
+
+        attributeExisted = map.get(key);
+        if (attributeExisted != null)
+        {
+            attributeExisted.nature = attribute.nature;
+            attributeExisted.frequency = attribute.frequency;
+            attributeExisted.totalFrequency = attribute.totalFrequency;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 往自定义词典中插入一个新词（非覆盖模式）<br>
+     *     动态增删不会持久化到词典文件
      *
      * @param word                新词 如“裸婚”
      * @param natureWithFrequency 词性和其对应的频次，比如“nz 1 v 2”，null时表示“nz 1”
@@ -200,7 +240,8 @@ public class CustomDictionary
     }
 
     /**
-     * 往自定义词典中插入一个新词（非覆盖模式）
+     * 往自定义词典中插入一个新词（非覆盖模式）<br>
+     *     动态增删不会持久化到词典文件
      *
      * @param word                新词 如“裸婚”
      * @return 是否插入成功（失败的原因可能是不覆盖等，可以通过调试模式了解原因）
@@ -213,7 +254,8 @@ public class CustomDictionary
     }
 
     /**
-     * 往自定义词典中插入一个新词（覆盖模式）
+     * 往自定义词典中插入一个新词（覆盖模式）<br>
+     *     动态增删不会持久化到词典文件
      *
      * @param word                新词 如“裸婚”
      * @param natureWithFrequency 词性和其对应的频次，比如“nz 1 v 2”，null时表示“nz 1”。
@@ -232,7 +274,8 @@ public class CustomDictionary
     }
 
     /**
-     * 以覆盖模式增加新词
+     * 以覆盖模式增加新词<br>
+     *     动态增删不会持久化到词典文件
      *
      * @param word
      * @return
@@ -253,7 +296,16 @@ public class CustomDictionary
         try
         {
             ByteArray byteArray = ByteArray.createByteArray(path + Predefine.BIN_EXT);
+            if (byteArray == null) return false;
             int size = byteArray.nextInt();
+            if (size < 0)   // 一种兼容措施,当size小于零表示文件头部储存了-size个用户词性
+            {
+                while (++size <= 0)
+                {
+                    Nature.create(byteArray.nextString());
+                }
+                size = byteArray.nextInt();
+            }
             CoreDictionary.Attribute[] attributes = new CoreDictionary.Attribute[size];
             final Nature[] natureIndexArray = Nature.values();
             for (int i = 0; i < size; ++i)
@@ -269,11 +321,11 @@ public class CustomDictionary
                     attributes[i].frequency[j] = byteArray.nextInt();
                 }
             }
-            if (!dat.load(byteArray, attributes) || byteArray.hasMore()) return false;
+            if (!dat.load(byteArray, attributes)) return false;
         }
         catch (Exception e)
         {
-            logger.warning("读取失败，问题发生在" + e);
+            logger.warning("读取失败，问题发生在" + TextUtility.exceptionToString(e));
             return false;
         }
         return true;
@@ -295,7 +347,8 @@ public class CustomDictionary
     }
 
     /**
-     * 删除单词
+     * 删除单词<br>
+     *     动态增删不会持久化到词典文件
      *
      * @param key
      */
@@ -444,5 +497,43 @@ public class CustomDictionary
         {
             processor.hit(searcher.begin, searcher.begin + searcher.length, searcher.value);
         }
+    }
+
+    /**
+     * 解析一段文本（目前采用了BinTrie+DAT的混合储存形式，此方法可以统一两个数据结构）
+     * @param text         文本
+     * @param processor    处理器
+     */
+    public static void parseText(String text, AhoCorasickDoubleArrayTrie.IHit<CoreDictionary.Attribute> processor)
+    {
+        if (trie != null)
+        {
+            BaseSearcher searcher = CustomDictionary.getSearcher(text);
+            int offset;
+            Map.Entry<String, CoreDictionary.Attribute> entry;
+            while ((entry = searcher.next()) != null)
+            {
+                offset = searcher.getOffset();
+                processor.hit(offset, offset + entry.getKey().length(), entry.getValue());
+            }
+        }
+        DoubleArrayTrie<CoreDictionary.Attribute>.Searcher searcher = dat.getSearcher(text, 0);
+        while (searcher.next())
+        {
+            processor.hit(searcher.begin, searcher.begin + searcher.length, searcher.value);
+        }
+    }
+
+    /**
+     * 热更新（重新加载）<br>
+     * 集群环境（或其他IOAdapter）需要自行删除缓存文件（路径 = HanLP.Config.CustomDictionaryPath[0] + Predefine.BIN_EXT）
+     * @return 是否加载成功
+     */
+    public static boolean reload()
+    {
+        String path[] = HanLP.Config.CustomDictionaryPath;
+        if (path == null || path.length == 0) return false;
+        IOUtil.deleteFile(path[0] + Predefine.BIN_EXT); // 删掉缓存
+        return loadMainDictionary(path[0]);
     }
 }

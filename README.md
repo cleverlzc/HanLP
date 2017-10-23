@@ -2,6 +2,11 @@ HanLP: Han Language Processing
 =====
 
 汉语言处理包
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.hankcs/hanlp/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.hankcs/hanlp/)
+[![GitHub release](https://img.shields.io/github/release/hankcs/HanLP.svg)](https://github.com/hankcs/hanlp/releases)
+[![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
+[![Docker Pulls](https://img.shields.io/docker/pulls/samurais/hanlp-api.svg?maxAge=2592000)](https://hub.docker.com/r/samurais/hanlp-api/) [![Docker Stars](https://img.shields.io/docker/stars/samurais/hanlp-api.svg?maxAge=2592000)](https://hub.docker.com/r/samurais/hanlp-api/) [![Docker Layers](https://images.microbadger.com/badges/image/samurais/hanlp-api.svg)](https://microbadger.com/#/images/samurais/hanlp-api)
+
 
 ------
 
@@ -36,12 +41,13 @@ HanLP: Han Language Processing
   * 声调
 > * 简繁转换
   * 繁体中文分词
-  * 简繁分歧词
+  * 简繁分歧词（简体、繁体、臺灣正體、香港繁體）
 > * 文本推荐
   * 语义推荐
   * 拼音推荐
   * 字词推荐
 > * 依存句法分析
+  * 基于神经网络的高性能依存句法分析器
   * MaxEnt依存句法分析
   * CRF依存句法分析
 > * 语料库工具
@@ -53,7 +59,7 @@ HanLP: Han Language Processing
   * CoNLL UA/LA/DA评测工具
 
 
-在提供丰富功能的同时，**HanLP**内部模块坚持低耦合、模型坚持惰性加载、服务坚持静态提供、词典坚持明文发布，使用非常方便，同时自带一些语料处理工具，帮助用户训练自己的语料。
+在提供丰富功能的同时，**HanLP**内部模块坚持低耦合、模型坚持惰性加载、服务坚持静态提供、词典坚持明文发布，使用非常方便，同时自带一些语料处理工具，帮助用户训练自己的模型。
 
 ------
 
@@ -61,13 +67,15 @@ HanLP: Han Language Processing
 
 HanLP下载地址：https://github.com/hankcs/HanLP/releases
 
-Solr5.x、Lucene5.x插件：https://github.com/hankcs/hanlp-solr-plugin
+Solr、Lucene插件：https://github.com/hankcs/hanlp-solr-plugin
+
+更多细节：https://github.com/hankcs/HanLP/wiki
 
 ------
 
 ## 下载与配置
 
-###方式一、Maven
+### 方式一、Maven
 
 为了方便用户，特提供内置了数据包的Portable版，只需在pom.xml加入：
 
@@ -75,13 +83,13 @@ Solr5.x、Lucene5.x插件：https://github.com/hankcs/hanlp-solr-plugin
 <dependency>
     <groupId>com.hankcs</groupId>
     <artifactId>hanlp</artifactId>
-    <version>portable-1.2.9</version>
+    <version>portable-1.3.5</version>
 </dependency>
 ```
 
 零配置，即可使用基本功能（除CRF分词、依存句法分析外的全部功能）。如果用户有自定义的需求，可以参考方式二，使用hanlp.properties进行配置。
 
-###方式二、下载jar、data、hanlp.properties
+### 方式二、下载jar、data、hanlp.properties
 
 **HanLP**将数据与程序分离，给予用户自定义的自由。
 
@@ -94,6 +102,7 @@ Solr5.x、Lucene5.x插件：https://github.com/hankcs/hanlp-solr-plugin
 | 数据包        | 功能   |  体积（MB）  |
 | --------   | -----:  | :----:  |
 | [data.zip](https://github.com/hankcs/HanLP/releases)     | 全部 |   255     |
+
 下载后解压到任意目录，接下来通过配置文件告诉HanLP数据包的位置。
 
 **HanLP**中的数据分为*词典*和*模型*，其中*词典*是词法分析必需的，*模型*是句法分析必需的。
@@ -118,20 +127,12 @@ Solr5.x、Lucene5.x插件：https://github.com/hankcs/hanlp-solr-plugin
 为data的**父目录**即可，比如data目录是`/Users/hankcs/Documents/data`，那么`root=/Users/hankcs/Documents/` 。
 
 - 如果选用mini词典的话，则需要修改配置文件：
+```
 CoreDictionaryPath=data/dictionary/CoreNatureDictionary.mini.txt
 BiGramDictionaryPath=data/dictionary/CoreNatureDictionary.ngram.mini.txt
+```
 
-最后将HanLP.properties放入classpath即可，对于Eclipse，一般是：
-
-    $Project/bin
----
-
-Web项目的话可以放在如下位置：
-
-    $Project/WEB-INF/classes
----
-
-对于任何项目，都可以放到src或resource目录下，编译时IDE会自动将其复制到classpath中。
+最后将HanLP.properties放入classpath即可，对于任何项目，都可以放到src或resources目录下，编译时IDE会自动将其复制到classpath中。
 
 如果放置不当，HanLP会智能提示当前环境下的合适路径，并且尝试从项目根目录读取数据集。
 
@@ -141,7 +142,7 @@ Web项目的话可以放在如下位置：
 
 *推荐用户始终通过工具类`HanLP`调用，这么做的好处是，将来**HanLP**升级后，用户无需修改调用代码。*
 
-所有Demo都位于[com.hankcs.demo](https://github.com/hankcs/HanLP/tree/master/src/test/java/com/hankcs/demo)下。
+所有Demo都位于[com.hankcs.demo](https://github.com/hankcs/HanLP/tree/master/src/test/java/com/hankcs/demo)下，比文档覆盖了更多细节，强烈建议运行一遍。
 
 ### 1. 第一个Demo
 
@@ -316,7 +317,7 @@ public class DemoCustomDictionary
 - 词典格式
   * 每一行代表一个单词，格式遵从`[单词] [词性A] [A的频次] [词性B] [B的频次] ...` 如果不填词性则表示采用词典的默认词性。
   * 词典的默认词性默认是名词n，可以通过配置文件修改：`全国地名大全.txt ns;`如果词典路径后面空格紧接着词性，则该词典默认是该词性。
-  * 在基于层叠隐马模型的最短路分词中，并不保证自定义词典中的词一定被切分出来。如果你认为这个词绝对应该切分出来，那么请将词频设大一些
+  * 在基于层叠隐马模型的最短路分词中，并不保证自定义词典中的词一定被切分出来。
   * 关于用户词典的更多信息请参考**词典说明**一章。
 - 算法详解
   * [《Trie树分词》](http://www.hankcs.com/program/java/tire-tree-participle.html)
@@ -348,7 +349,7 @@ for (String sentence : testCase)
 - 算法详解
   * [《实战HMM-Viterbi角色标注中国人名识别》](http://www.hankcs.com/nlp/chinese-name-recognition-in-actual-hmm-viterbi-role-labeling.html)
 
-### 9. 音译人名识别
+### 10. 音译人名识别
 
 ```java
 String[] testCase = new String[]{
@@ -718,11 +719,13 @@ public class DemoDependencyParser
 ### 基本格式
 词典分为词频词性词典和词频词典。
 
-- 词频词性词典
+- 词频词性词典（如`CoreNatureDictionary.txt`）
    * 每一行代表一个单词，格式遵从`[单词] [词性A] [A的频次] [词性B] [B的频次] ...`。
-- 词频词典
-  * 每一行代表一个单词，格式遵从`[单词] [单词的频次]`。
-  * 每一行的分隔符为空格符或制表符
+   * 支持省略词性和频次，直接一行一个单词。
+   * `.txt`词典文件的分隔符为空格或制表符，所以不支持含有空格的词语。如果需要支持空格，请使用英文逗号`,`分割的**纯文本**`.csv`文件。在使用Excel等富文本编辑器时，则请注意保存为**纯文本**形式。
+- 词频词典（如`CoreNatureDictionary.ngram.txt`）
+  * 每一行代表一个单词或条目，格式遵从`[单词] [单词的频次]`。
+  * 每一行的分隔符为空格或制表符。
 
 少数词典有自己的专用格式，比如同义词词典兼容《同义词词林扩展版》的文本格式，而转移矩阵词典则是一个csv表格。
 
@@ -794,3 +797,4 @@ HanLP.Config.enableDebug();
 作者 [@hankcs](http://weibo.com/hankcs/)
 
 2014年12月16日
+

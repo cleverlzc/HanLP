@@ -12,13 +12,12 @@
 package com.hankcs.hanlp.dictionary;
 
 import com.hankcs.hanlp.HanLP;
-import com.hankcs.hanlp.corpus.io.ByteArray;
+import com.hankcs.hanlp.corpus.io.IOUtil;
+import com.hankcs.hanlp.seg.common.Vertex;
 import com.hankcs.hanlp.utility.Predefine;
 
 import java.io.*;
-import java.util.Arrays;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 import java.util.logging.Level;
 
@@ -41,11 +40,9 @@ public class CoreBiGramTableDictionary
      */
     static int pair[];
 
-    public final static String path = HanLP.Config.BiGramDictionaryPath;
-    final static String datPath = HanLP.Config.BiGramDictionaryPath + ".table" + Predefine.BIN_EXT;
-
     static
     {
+        String path = HanLP.Config.BiGramDictionaryPath;
         logger.info("开始加载二元词典" + path + ".table");
         long start = System.currentTimeMillis();
         if (!load(path))
@@ -61,12 +58,13 @@ public class CoreBiGramTableDictionary
 
     static boolean load(String path)
     {
+        String datPath = HanLP.Config.BiGramDictionaryPath + ".table" + Predefine.BIN_EXT;
         if (loadDat(datPath)) return true;
         BufferedReader br;
         TreeMap<Integer, TreeMap<Integer, Integer>> map = new TreeMap<Integer, TreeMap<Integer, Integer>>();
         try
         {
-            br = new BufferedReader(new InputStreamReader(new FileInputStream(path), "UTF-8"));
+            br = new BufferedReader(new InputStreamReader(IOUtil.newInputStream(path), "UTF-8"));
             String line;
             int total = 0;
             int maxWordId = CoreDictionary.trie.size();
@@ -157,7 +155,7 @@ public class CoreBiGramTableDictionary
 //                out.writeInt(i);
 //            }
 //            out.close();
-            ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(path));
+            ObjectOutputStream out = new ObjectOutputStream(IOUtil.newOutputStream(path));
             out.writeObject(start);
             out.writeObject(pair);
             out.close();
@@ -192,7 +190,7 @@ public class CoreBiGramTableDictionary
 
         try
         {
-            ObjectInputStream in = new ObjectInputStream(new FileInputStream(path));
+            ObjectInputStream in = new ObjectInputStream(IOUtil.newInputStream(path));
             start = (int[]) in.readObject();
             if (CoreDictionary.trie.size() != start.length - 1)     // 目前CoreNatureDictionary.ngram.txt的缓存依赖于CoreNatureDictionary.txt的缓存
             {                                                       // 所以这里校验一下二者的一致性，不然可能导致下标越界或者ngram错乱的情况
@@ -271,9 +269,14 @@ public class CoreBiGramTableDictionary
      */
     public static int getBiFrequency(int idA, int idB)
     {
-        if (idA == -1 || idB == -1)
+        // 负数id表示来自用户词典的词语的词频（用户自定义词语没有id），返回正值增加其亲和度
+        if (idA < 0)
         {
-            return 1000;   // -1表示用户词典，返回正值增加其亲和度
+            return -idA;
+        }
+        if (idB < 0)
+        {
+            return -idB;
         }
         int index = binarySearch(pair, start[idA], start[idA + 1] - start[idA], idB);
         if (index < 0) return 0;
@@ -290,5 +293,18 @@ public class CoreBiGramTableDictionary
     public static int getWordID(String a)
     {
         return CoreDictionary.trie.exactMatchSearch(a);
+    }
+
+    /**
+     * 热更新二元接续词典<br>
+     *     集群环境（或其他IOAdapter）需要自行删除缓存文件
+     * @return 是否成功
+     */
+    public static boolean reload()
+    {
+        String biGramDictionaryPath = HanLP.Config.BiGramDictionaryPath;
+        IOUtil.deleteFile(biGramDictionaryPath + ".table" + Predefine.BIN_EXT);
+
+        return load(biGramDictionaryPath);
     }
 }

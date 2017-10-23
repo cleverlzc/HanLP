@@ -12,19 +12,19 @@
 package com.hankcs.hanlp.dictionary;
 
 import com.hankcs.hanlp.HanLP;
-import com.hankcs.hanlp.algoritm.EditDistance;
+import com.hankcs.hanlp.algorithm.EditDistance;
+import com.hankcs.hanlp.corpus.io.IOUtil;
 import com.hankcs.hanlp.dictionary.common.CommonSynonymDictionary;
 import com.hankcs.hanlp.dictionary.common.CommonSynonymDictionaryEx;
 import com.hankcs.hanlp.dictionary.stopword.CoreStopWordDictionary;
 import com.hankcs.hanlp.seg.common.Term;
 import com.hankcs.hanlp.utility.TextUtility;
 
-import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import static com.hankcs.hanlp.utility.Predefine.logger;
 /**
- * 核心同义词词典
+ * 核心同义词词典(使用语义id作为value）
  *
  * @author hankcs
  */
@@ -36,11 +36,11 @@ public class CoreSynonymDictionaryEx
     {
         try
         {
-            dictionary = CommonSynonymDictionaryEx.create(new FileInputStream(HanLP.Config.CoreSynonymDictionaryDictionaryPath));
+            dictionary = CommonSynonymDictionaryEx.create(IOUtil.newInputStream(HanLP.Config.CoreSynonymDictionaryDictionaryPath));
         }
         catch (Exception e)
         {
-            System.err.println("载入核心同义词词典失败" + e);
+            logger.severe("载入核心同义词词典失败" + e);
             System.exit(-1);
         }
     }
